@@ -15,14 +15,14 @@ const OKAPI_CONFIG = {
   // Custom activities created on-the-fly are saved in
   // localStorage and merged with these at runtime.
   templates: [
-    { name: "Deep work",  color: "#4a8ff0" },
-    { name: "Meeting",    color: "#a855f7" },
-    { name: "Admin",      color: "#d4b878" },
-    { name: "Learning",   color: "#f5a623" },
-    { name: "Exercise",   color: "#e04040" },
-    { name: "Break",      color: "#3a9a5c" },
-    { name: "Planning",   color: "#06b6d4" },
-    { name: "Personal",   color: "#fb923c" },
+    { name: "Jóga",  color: "#4a8ff0" },
+    { name: "Étkezés",    color: "#a855f7" },
+    { name: "Házimunka",      color: "#d4b878" },
+    { name: "Anyu",   color: "#f5a623" },
+    { name: "Séta",   color: "#e04040" },
+    { name: "Zenélés",      color: "#3a9a5c" },
+    { name: "Programozás",   color: "#06b6d4" },
+    { name: "Fürdés",   color: "#fb923c" },
   ],
 
 };
