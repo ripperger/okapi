@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Okapi</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="app">
+
+    <!-- ── Header ── -->
+    <header id="header">
+      <div class="header-left">
+        <div class="wordmark">OKA<span>PI</span></div>
+        <div id="header-date"></div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-push" class="btn">push +30</button>
+        <div class="btn-sep"></div>
+        <button id="btn-json" class="btn icon-btn" title="Export JSON">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <path d="M6.5 1v8M3 6.5l3.5 3.5 3.5-3.5M2 11h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          json
+        </button>
+        <button id="btn-csv" class="btn icon-btn" title="Export CSV">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <path d="M6.5 1v8M3 6.5l3.5 3.5 3.5-3.5M2 11h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          csv
+        </button>
+      </div>
+    </header>
+
+    <!-- ── Timeline ── -->
+    <div id="timeline-wrap">
+      <div id="timeline">
+        <div id="time-labels"></div>
+        <div id="blocks-area"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Backdrop ── -->
+  <div id="backdrop"></div>
+
+  <!-- ── Bottom sheet ── -->
+  <div id="sheet">
+    <div id="sheet-handle-wrap">
+      <div id="sheet-handle"></div>
+    </div>
+    <div id="sheet-title"></div>
+
+    <div id="sheet-options"></div>
+
+    <div id="sheet-new">
+      <div id="sheet-new-label">new activity</div>
+      <div id="sheet-new-row">
+        <input id="new-name" placeholder="activity name…" autocomplete="off" spellcheck="false" maxlength="32">
+        <button id="add-custom-btn" class="btn primary">add</button>
+      </div>
+      <div id="color-swatches"></div>
+    </div>
+  </div>
+
+  <!-- config must load before app -->
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>
