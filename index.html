@@ -8,6 +8,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="robots" content="noindex, nofollow">
   <title>Okapi</title>
+  <!-- Golden "O" favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text x='3' y='27' font-size='28' font-family='Georgia,serif' font-weight='bold' fill='%23d4b878'>O</text></svg>">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -17,8 +19,12 @@
     <!-- ── Header ── -->
     <header id="header">
       <div class="header-left">
-        <div class="wordmark">OKA<span>PI</span></div>
-        <div id="header-date"></div>
+        <div class="wordmark">OKAPI</div>
+        <div class="date-nav">
+          <button id="btn-prev" class="nav-btn" title="Previous day">&#8249;</button>
+          <div id="header-date"></div>
+          <button id="btn-next" class="nav-btn" title="Next day">&#8250;</button>
+        </div>
       </div>
       <div class="header-actions">
         <button id="btn-push" class="btn">push +30</button>
@@ -58,8 +64,16 @@
     </div>
     <div id="sheet-title"></div>
 
+    <!-- Activity options: clear button + 3-column grid -->
     <div id="sheet-options"></div>
 
+    <!-- Optional note — filled before tapping a template -->
+    <div id="sheet-detail-wrap">
+      <div id="sheet-detail-label">note <span>optional — fill before selecting above</span></div>
+      <input id="sheet-detail" placeholder="add details…" autocomplete="off" spellcheck="false" maxlength="80">
+    </div>
+
+    <!-- New custom activity -->
     <div id="sheet-new">
       <div id="sheet-new-label">new activity</div>
       <div id="sheet-new-row">

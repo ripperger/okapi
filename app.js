@@ -1,20 +1,17 @@
 // ═══════════════════════════════════════════════════════
 //  OKAPI — APP
-//  Daily scheduler. Requires config.js to be loaded first.
+//  Requires config.js to be loaded first.
 // ═══════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────────────────
 //  Constants
 // ─────────────────────────────────────────────────────
-const SLOT_H   = 44;       // px — must match --slot-h in CSS
-const LS_SCHED = () => `okapi_schedule_${todayStr()}`;
+const SLOT_H    = 44;        // px — must match --slot-h in CSS
 const LS_CUSTOM = "okapi_custom_templates";
 
-const PALETTE = [
-  "#4a8ff0", "#a855f7", "#d4b878", "#3a9a5c",
-  "#e04040", "#f5a623", "#06b6d4", "#ec4899",
-  "#84cc16", "#fb923c",
-];
+// Derive flat palette array + named list from config
+const PALETTE       = OKAPI_CONFIG.palette.map(p => p.color);
+const PALETTE_NAMED = OKAPI_CONFIG.palette;   // [{ name, color }, ...]
 
 // ─────────────────────────────────────────────────────
 //  Time utilities
@@ -23,7 +20,6 @@ function parseMin(t) {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
 }
-
 function fmtMin(totalMin) {
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
@@ -33,18 +29,44 @@ function fmtMin(totalMin) {
 const START = parseMin(OKAPI_CONFIG.dayStart);
 const END   = parseMin(OKAPI_CONFIG.dayEnd);
 
-// Generate slot keys: ["06:00", "06:30", ..., "21:30"]
 const SLOTS = [];
 for (let m = START; m < END; m += 30) SLOTS.push(fmtMin(m));
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
-
 function currentMin() {
   const n = new Date();
   return n.getHours() * 60 + n.getMinutes();
 }
+
+// ─────────────────────────────────────────────────────
+//  Slot value helpers
+//  Slots can be: null | "Activity" (legacy) | { activity, detail }
+// ─────────────────────────────────────────────────────
+function slotActivity(val) {
+  if (!val) return null;
+  if (typeof val === "string") return val;
+  return val.activity || null;
+}
+function slotDetail(val) {
+  if (!val || typeof val === "string") return "";
+  return val.detail || "";
+}
+
+// ─────────────────────────────────────────────────────
+//  App state
+// ─────────────────────────────────────────────────────
+let viewDate        = todayStr();
+let schedule        = {};           // loaded below after helpers defined
+let sheetTarget     = null;
+let selectedColor   = PALETTE[0];
+let hasAutoScrolled = false;
+
+// ─────────────────────────────────────────────────────
+//  Storage key — depends on viewDate
+// ─────────────────────────────────────────────────────
+function LS_SCHED() { return `okapi_schedule_${viewDate}`; }
 
 // ─────────────────────────────────────────────────────
 //  Schedule storage
@@ -54,18 +76,15 @@ function loadSchedule() {
     const raw = localStorage.getItem(LS_SCHED());
     if (raw) {
       const parsed = JSON.parse(raw);
-      // Ensure every slot exists (guards against day-range changes)
       const sched = {};
       SLOTS.forEach(s => { sched[s] = (s in parsed) ? parsed[s] : null; });
       return sched;
     }
   } catch (_) {}
-  // Fresh day
   const sched = {};
   SLOTS.forEach(s => { sched[s] = null; });
   return sched;
 }
-
 function saveSchedule(sched) {
   localStorage.setItem(LS_SCHED(), JSON.stringify(sched));
 }
@@ -79,7 +98,6 @@ function loadCustomTemplates() {
     return raw ? JSON.parse(raw) : [];
   } catch (_) { return []; }
 }
-
 function saveCustomTemplate(name, color) {
   const customs = loadCustomTemplates();
   if (!customs.find(t => t.name === name)) {
@@ -87,7 +105,6 @@ function saveCustomTemplate(name, color) {
     localStorage.setItem(LS_CUSTOM, JSON.stringify(customs));
   }
 }
-
 function allTemplates() {
   const customs   = loadCustomTemplates();
   const configSet = new Set(OKAPI_CONFIG.templates.map(t => t.name));
@@ -96,7 +113,6 @@ function allTemplates() {
     ...customs.filter(t => !configSet.has(t.name)),
   ];
 }
-
 function colorOf(name) {
   const t = allTemplates().find(t => t.name === name);
   return t ? t.color : "#4a6a8a";
@@ -109,12 +125,13 @@ function groupSlots(sched) {
   const groups = [];
   let i = 0;
   while (i < SLOTS.length) {
-    const activity = sched[SLOTS[i]];
+    const activity = slotActivity(sched[SLOTS[i]]);
     let j = i + 1;
-    while (j < SLOTS.length && sched[SLOTS[j]] === activity) j++;
+    while (j < SLOTS.length && slotActivity(sched[SLOTS[j]]) === activity) j++;
     groups.push({
       slots:    SLOTS.slice(i, j),
       activity,
+      detail:   slotDetail(sched[SLOTS[i]]),   // detail from first slot
       idxStart: i,
     });
     i = j;
@@ -123,12 +140,9 @@ function groupSlots(sched) {
 }
 
 // ─────────────────────────────────────────────────────
-//  App state
+//  Initialise schedule
 // ─────────────────────────────────────────────────────
-let schedule       = loadSchedule();
-let sheetTarget    = null;   // { slots: [...], isAssigned: bool }
-let selectedColor  = PALETTE[0];
-let hasAutoScrolled = false;
+schedule = loadSchedule();
 
 // ─────────────────────────────────────────────────────
 //  Render
@@ -139,11 +153,18 @@ function render() {
 }
 
 function renderHeader() {
-  const d = new Date();
+  const d       = new Date(viewDate + "T00:00:00");
+  const isToday = viewDate === todayStr();
+
   document.getElementById("header-date").textContent =
     d.toLocaleDateString("en-GB", {
       weekday: "short", day: "numeric", month: "short",
     }).toUpperCase();
+
+  document.getElementById("header-date").classList.toggle("is-today", isToday);
+
+  // Dim the next arrow when on today (future scheduling still allowed; just a visual hint)
+  document.getElementById("btn-next").classList.toggle("nav-at-edge", isToday);
 }
 
 function renderTimeline() {
@@ -177,7 +198,7 @@ function renderTimeline() {
   // ── Half-hour lines ──
   for (let idx = 0; idx < SLOTS.length; idx++) {
     const slotM = START + idx * 30;
-    if (slotM % 60 === 0) continue; // already drawn as hour-line
+    if (slotM % 60 === 0) continue;
     const line = document.createElement("div");
     line.className = "half-line";
     line.style.top = (idx * SLOT_H) + "px";
@@ -201,13 +222,12 @@ function renderTimeline() {
       el.className = "block assigned";
       el.style.cssText = `top:${y + 1}px;height:${h - 1}px;border-left-color:${color}`;
       el.innerHTML = `
-        <span class="block-name" style="color:${color}">${group.activity}</span>
+        <span class="block-name" style="color:${color}">${group.activity}${group.detail ? `<span class="block-detail"> · ${group.detail}</span>` : ""}</span>
         <span class="block-time">${fmtMin(sm)} – ${fmtMin(em)}${dur > 30 ? ` · ${dur}m` : ""}</span>
       `;
       el.addEventListener("click", () => openSheet(group.slots, true));
       blocksArea.appendChild(el);
     } else {
-      // Each empty slot is individually tappable
       group.slots.forEach((slot, i) => {
         const idx = group.idxStart + i;
         const el  = document.createElement("div");
@@ -219,23 +239,22 @@ function renderTimeline() {
     }
   });
 
-  // ── Current time indicator ──
   renderTimeIndicator();
 }
 
 function renderTimeIndicator() {
+  if (viewDate !== todayStr()) return;   // only show indicator on today
+
   const blocksArea = document.getElementById("blocks-area");
   const nm = currentMin();
-
   if (nm < START || nm > END) return;
 
   const y   = ((nm - START) / 30) * SLOT_H;
   const ind = document.createElement("div");
-  ind.id         = "time-ind";
-  ind.style.top  = y + "px";
+  ind.id        = "time-ind";
+  ind.style.top = y + "px";
   blocksArea.appendChild(ind);
 
-  // Auto-scroll to current time on first render
   if (!hasAutoScrolled) {
     hasAutoScrolled = true;
     requestAnimationFrame(() => {
@@ -246,12 +265,27 @@ function renderTimeIndicator() {
   }
 }
 
-// Update only the time indicator every minute
+// Refresh time indicator every minute
 setInterval(() => {
   const old = document.getElementById("time-ind");
   if (old) old.remove();
   renderTimeIndicator();
 }, 60_000);
+
+// ─────────────────────────────────────────────────────
+//  Day navigation
+// ─────────────────────────────────────────────────────
+function navigate(delta) {
+  const d = new Date(viewDate + "T00:00:00");
+  d.setDate(d.getDate() + delta);
+  viewDate        = d.toISOString().slice(0, 10);
+  schedule        = loadSchedule();
+  hasAutoScrolled = false;
+  render();
+}
+
+document.getElementById("btn-prev").addEventListener("click", () => navigate(-1));
+document.getElementById("btn-next").addEventListener("click", () => navigate(+1));
 
 // ─────────────────────────────────────────────────────
 //  Bottom sheet
@@ -260,16 +294,19 @@ function openSheet(slots, isAssigned) {
   sheetTarget   = { slots, isAssigned };
   selectedColor = PALETTE[0];
 
-  const sm  = START + SLOTS.indexOf(slots[0]) * 30;
-  const em  = sm + slots.length * 30;
-  const act = isAssigned ? schedule[slots[0]] : null;
+  const sm          = START + SLOTS.indexOf(slots[0]) * 30;
+  const em          = sm + slots.length * 30;
+  const rawVal      = isAssigned ? schedule[slots[0]] : null;
+  const act         = slotActivity(rawVal);
+  const existDetail = slotDetail(rawVal);
 
   document.getElementById("sheet-title").textContent =
-    act
-      ? `${act}  ·  ${fmtMin(sm)} – ${fmtMin(em)}`
-      : `${fmtMin(sm)} – ${fmtMin(em)}`;
+    act ? `${act}  ·  ${fmtMin(sm)} – ${fmtMin(em)}` : `${fmtMin(sm)} – ${fmtMin(em)}`;
 
-  // ── Options ──
+  // Pre-fill detail input with existing note
+  document.getElementById("sheet-detail").value = existDetail;
+
+  // ── Build options ──
   const opts = document.getElementById("sheet-options");
   opts.innerHTML = "";
 
@@ -286,34 +323,36 @@ function openSheet(slots, isAssigned) {
     opts.appendChild(clearBtn);
   }
 
+  // 3-column grid of templates
+  const grid = document.createElement("div");
+  grid.className = "sheet-grid";
+
   allTemplates().forEach(tmpl => {
     const btn = document.createElement("button");
     btn.className = "sheet-opt template" + (act === tmpl.name ? " active" : "");
+    btn.style.setProperty("--tmpl-color", tmpl.color);
     btn.style.borderLeftColor = tmpl.color;
     btn.style.color           = tmpl.color;
     btn.textContent           = tmpl.name;
+    btn.title                 = tmpl.name;
     btn.addEventListener("click", () => {
-      slots.forEach(s => { schedule[s] = tmpl.name; });
+      const detail = document.getElementById("sheet-detail").value.trim();
+      slots.forEach(s => { schedule[s] = { activity: tmpl.name, detail }; });
       saveSchedule(schedule);
       closeSheet();
       render();
     });
-    opts.appendChild(btn);
+    grid.appendChild(btn);
   });
 
-  // Reset new-activity input
+  opts.appendChild(grid);
+
+  // Reset new-activity fields
   document.getElementById("new-name").value = "";
   renderColorSwatches();
 
   document.getElementById("sheet").classList.add("open");
   document.getElementById("backdrop").classList.add("open");
-
-  // Focus input after transition (desktop)
-  setTimeout(() => {
-    if (window.matchMedia("(hover: hover)").matches) {
-      // Only auto-focus on non-touch devices to avoid keyboard popping up on mobile
-    }
-  }, 320);
 }
 
 function closeSheet() {
@@ -325,11 +364,11 @@ function closeSheet() {
 function renderColorSwatches() {
   const row = document.getElementById("color-swatches");
   row.innerHTML = "";
-  PALETTE.forEach(color => {
+  PALETTE_NAMED.forEach(({ name, color }) => {
     const sw = document.createElement("div");
     sw.className = "color-swatch" + (color === selectedColor ? " selected" : "");
     sw.style.background = color;
-    sw.title = color;
+    sw.title            = name;
     sw.addEventListener("click", () => {
       selectedColor = color;
       renderColorSwatches();
@@ -338,19 +377,19 @@ function renderColorSwatches() {
   });
 }
 
-// Add custom activity
+// ── Add custom activity ──
 document.getElementById("add-custom-btn").addEventListener("click", () => {
   const name = document.getElementById("new-name").value.trim();
   if (!name || !sheetTarget) return;
+  const detail = document.getElementById("sheet-detail").value.trim();
 
   saveCustomTemplate(name, selectedColor);
-  sheetTarget.slots.forEach(s => { schedule[s] = name; });
+  sheetTarget.slots.forEach(s => { schedule[s] = { activity: name, detail }; });
   saveSchedule(schedule);
   closeSheet();
   render();
 });
 
-// Enter key in name input
 document.getElementById("new-name").addEventListener("keydown", e => {
   if (e.key === "Enter") document.getElementById("add-custom-btn").click();
 });
@@ -364,23 +403,14 @@ document.getElementById("backdrop").addEventListener("click", closeSheet);
 document.getElementById("btn-push").addEventListener("click", () => {
   const nm = currentMin();
 
-  // Find the index of the slot currently containing 'now'
-  // (the slot whose window [slotStart, slotStart+30) includes nm)
   let currentIdx = -1;
   for (let i = 0; i < SLOTS.length; i++) {
     const slotStart = START + i * 30;
-    if (nm >= slotStart && nm < slotStart + 30) {
-      currentIdx = i;
-      break;
-    }
+    if (nm >= slotStart && nm < slotStart + 30) { currentIdx = i; break; }
   }
-
-  // If before start, push from slot 0; if after end, do nothing
   if (currentIdx < 0 && nm < START) currentIdx = 0;
   if (currentIdx < 0) return;
 
-  // Shift everything from currentIdx onward by +1 slot
-  // Read from end to avoid overwriting before copying
   const sched = { ...schedule };
   for (let i = SLOTS.length - 1; i > currentIdx; i--) {
     sched[SLOTS[i]] = sched[SLOTS[i - 1]];
@@ -406,13 +436,10 @@ function triggerDownload(filename, content, mimeType) {
 }
 
 document.getElementById("btn-json").addEventListener("click", () => {
-  const date = todayStr();
   const data = {
-    date,
+    date:        viewDate,
     generatedAt: new Date().toISOString(),
-    slots: Object.fromEntries(
-      SLOTS.map(s => [s, schedule[s]])
-    ),
+    slots: Object.fromEntries(SLOTS.map(s => [s, schedule[s]])),
     blocks: groupSlots(schedule)
       .filter(g => g.activity)
       .map(g => ({
@@ -420,24 +447,25 @@ document.getElementById("btn-json").addEventListener("click", () => {
         end:      fmtMin(START + g.idxStart * 30 + g.slots.length * 30),
         duration: g.slots.length * 30,
         activity: g.activity,
+        detail:   g.detail,
         color:    colorOf(g.activity),
       })),
   };
-  triggerDownload(`okapi-${date}.json`, JSON.stringify(data, null, 2), "application/json");
+  triggerDownload(`okapi-${viewDate}.json`, JSON.stringify(data, null, 2), "application/json");
 });
 
 document.getElementById("btn-csv").addEventListener("click", () => {
-  const date = todayStr();
   const rows = [
-    "time,end,activity,duration_min",
+    "time,end,activity,detail,duration_min",
     ...SLOTS.map((s, i) => {
       const sm  = START + i * 30;
       const em  = sm + 30;
-      const act = schedule[s] || "";
-      return `${fmtMin(sm)},${fmtMin(em)},${act},${act ? 30 : ""}`;
+      const act = slotActivity(schedule[s]) || "";
+      const det = slotDetail(schedule[s]);
+      return `${fmtMin(sm)},${fmtMin(em)},"${act}","${det}",${act ? 30 : ""}`;
     }),
   ];
-  triggerDownload(`okapi-${date}.csv`, rows.join("\n"), "text/csv");
+  triggerDownload(`okapi-${viewDate}.csv`, rows.join("\n"), "text/csv");
 });
 
 // ─────────────────────────────────────────────────────
