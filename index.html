@@ -8,8 +8,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="robots" content="noindex, nofollow">
   <title>Okapi</title>
-  <!-- Golden "O" favicon -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text x='3' y='27' font-size='28' font-family='Georgia,serif' font-weight='bold' fill='%23d4b878'>O</text></svg>">
+  <!-- Dark-background golden "O" favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2306090d'/><text x='4' y='26' font-size='26' font-family='Georgia,serif' font-weight='bold' fill='%23d4b878'>O</text></svg>">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -30,16 +30,10 @@
         <button id="btn-push" class="btn">push +30</button>
         <div class="btn-sep"></div>
         <button id="btn-json" class="btn icon-btn" title="Export JSON">
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <svg width="12" height="12" viewBox="0 0 13 13" fill="none">
             <path d="M6.5 1v8M3 6.5l3.5 3.5 3.5-3.5M2 11h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           json
-        </button>
-        <button id="btn-csv" class="btn icon-btn" title="Export CSV">
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <path d="M6.5 1v8M3 6.5l3.5 3.5 3.5-3.5M2 11h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          csv
         </button>
       </div>
     </header>
@@ -64,16 +58,13 @@
     </div>
     <div id="sheet-title"></div>
 
-    <!-- Activity options: clear button + 3-column grid -->
     <div id="sheet-options"></div>
 
-    <!-- Optional note — filled before tapping a template -->
     <div id="sheet-detail-wrap">
       <div id="sheet-detail-label">note <span>optional — fill before selecting above</span></div>
       <input id="sheet-detail" placeholder="add details…" autocomplete="off" spellcheck="false" maxlength="80">
     </div>
 
-    <!-- New custom activity -->
     <div id="sheet-new">
       <div id="sheet-new-label">new activity</div>
       <div id="sheet-new-row">
@@ -84,7 +75,6 @@
     </div>
   </div>
 
-  <!-- config must load before app -->
   <script src="config.js"></script>
   <script src="app.js"></script>
 

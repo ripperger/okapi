@@ -6,12 +6,11 @@
 // ─────────────────────────────────────────────────────
 //  Constants
 // ─────────────────────────────────────────────────────
-const SLOT_H    = 44;        // px — must match --slot-h in CSS
+const SLOT_H    = 44;
 const LS_CUSTOM = "okapi_custom_templates";
 
-// Derive flat palette array + named list from config
 const PALETTE       = OKAPI_CONFIG.palette.map(p => p.color);
-const PALETTE_NAMED = OKAPI_CONFIG.palette;   // [{ name, color }, ...]
+const PALETTE_NAMED = OKAPI_CONFIG.palette;
 
 // ─────────────────────────────────────────────────────
 //  Time utilities
@@ -32,8 +31,17 @@ const END   = parseMin(OKAPI_CONFIG.dayEnd);
 const SLOTS = [];
 for (let m = START; m < END; m += 30) SLOTS.push(fmtMin(m));
 
+// ── Local-date helpers ────────────────────────────────
+// NEVER use toISOString() for date keys — it returns UTC and shifts
+// the date backward in UTC+1/+2 (Central European) timezones.
+function localDateStr(d) {
+  const y  = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const dy = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${dy}`;
+}
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return localDateStr(new Date());
 }
 function currentMin() {
   const n = new Date();
@@ -42,12 +50,11 @@ function currentMin() {
 
 // ─────────────────────────────────────────────────────
 //  Slot value helpers
-//  Slots can be: null | "Activity" (legacy) | { activity, detail }
+//  null | "Activity" (legacy) | { activity, detail }
 // ─────────────────────────────────────────────────────
 function slotActivity(val) {
   if (!val) return null;
-  if (typeof val === "string") return val;
-  return val.activity || null;
+  return typeof val === "string" ? val : (val.activity || null);
 }
 function slotDetail(val) {
   if (!val || typeof val === "string") return "";
@@ -58,14 +65,11 @@ function slotDetail(val) {
 //  App state
 // ─────────────────────────────────────────────────────
 let viewDate        = todayStr();
-let schedule        = {};           // loaded below after helpers defined
+let schedule        = {};
 let sheetTarget     = null;
 let selectedColor   = PALETTE[0];
 let hasAutoScrolled = false;
 
-// ─────────────────────────────────────────────────────
-//  Storage key — depends on viewDate
-// ─────────────────────────────────────────────────────
 function LS_SCHED() { return `okapi_schedule_${viewDate}`; }
 
 // ─────────────────────────────────────────────────────
@@ -76,7 +80,7 @@ function loadSchedule() {
     const raw = localStorage.getItem(LS_SCHED());
     if (raw) {
       const parsed = JSON.parse(raw);
-      const sched = {};
+      const sched  = {};
       SLOTS.forEach(s => { sched[s] = (s in parsed) ? parsed[s] : null; });
       return sched;
     }
@@ -119,7 +123,7 @@ function colorOf(name) {
 }
 
 // ─────────────────────────────────────────────────────
-//  Grouping — merge consecutive same-activity slots
+//  Grouping
 // ─────────────────────────────────────────────────────
 function groupSlots(sched) {
   const groups = [];
@@ -128,19 +132,14 @@ function groupSlots(sched) {
     const activity = slotActivity(sched[SLOTS[i]]);
     let j = i + 1;
     while (j < SLOTS.length && slotActivity(sched[SLOTS[j]]) === activity) j++;
-    groups.push({
-      slots:    SLOTS.slice(i, j),
-      activity,
-      detail:   slotDetail(sched[SLOTS[i]]),   // detail from first slot
-      idxStart: i,
-    });
+    groups.push({ slots: SLOTS.slice(i, j), activity, detail: slotDetail(sched[SLOTS[i]]), idxStart: i });
     i = j;
   }
   return groups;
 }
 
 // ─────────────────────────────────────────────────────
-//  Initialise schedule
+//  Init schedule
 // ─────────────────────────────────────────────────────
 schedule = loadSchedule();
 
@@ -153,18 +152,13 @@ function render() {
 }
 
 function renderHeader() {
-  const d       = new Date(viewDate + "T00:00:00");
-  const isToday = viewDate === todayStr();
+  const parts = viewDate.split("-").map(Number);
+  const d     = new Date(parts[0], parts[1] - 1, parts[2]);  // local date, no UTC shift
 
   document.getElementById("header-date").textContent =
-    d.toLocaleDateString("en-GB", {
-      weekday: "short", day: "numeric", month: "short",
-    }).toUpperCase();
+    d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).toUpperCase();
 
-  document.getElementById("header-date").classList.toggle("is-today", isToday);
-
-  // Dim the next arrow when on today (future scheduling still allowed; just a visual hint)
-  document.getElementById("btn-next").classList.toggle("nav-at-edge", isToday);
+  document.getElementById("header-date").classList.toggle("is-today", viewDate === todayStr());
 }
 
 function renderTimeline() {
@@ -174,13 +168,11 @@ function renderTimeline() {
   timeLabels.innerHTML = "";
 
   const totalH = SLOTS.length * SLOT_H;
-  blocksArea.style.height  = totalH + "px";
-  timeLabels.style.height  = totalH + "px";
+  blocksArea.style.height = totalH + "px";
+  timeLabels.style.height = totalH + "px";
 
-  // ── Time labels (every hour) + hour lines ──
   for (let m = START; m <= END; m += 60) {
     const y = ((m - START) / 30) * SLOT_H;
-
     const lbl = document.createElement("div");
     lbl.className   = "time-label";
     lbl.textContent = fmtMin(m);
@@ -195,20 +187,15 @@ function renderTimeline() {
     }
   }
 
-  // ── Half-hour lines ──
   for (let idx = 0; idx < SLOTS.length; idx++) {
-    const slotM = START + idx * 30;
-    if (slotM % 60 === 0) continue;
+    if ((START + idx * 30) % 60 === 0) continue;
     const line = document.createElement("div");
     line.className = "half-line";
     line.style.top = (idx * SLOT_H) + "px";
     blocksArea.appendChild(line);
   }
 
-  // ── Activity blocks ──
-  const groups = groupSlots(schedule);
-
-  groups.forEach(group => {
+  groupSlots(schedule).forEach(group => {
     const y = group.idxStart * SLOT_H;
     const h = group.slots.length * SLOT_H;
 
@@ -229,10 +216,9 @@ function renderTimeline() {
       blocksArea.appendChild(el);
     } else {
       group.slots.forEach((slot, i) => {
-        const idx = group.idxStart + i;
-        const el  = document.createElement("div");
-        el.className = "block empty";
-        el.style.cssText = `top:${idx * SLOT_H}px;height:${SLOT_H}px`;
+        const el = document.createElement("div");
+        el.className     = "block empty";
+        el.style.cssText = `top:${(group.idxStart + i) * SLOT_H}px;height:${SLOT_H}px`;
         el.addEventListener("click", () => openSheet([slot], false));
         blocksArea.appendChild(el);
       });
@@ -243,29 +229,26 @@ function renderTimeline() {
 }
 
 function renderTimeIndicator() {
-  if (viewDate !== todayStr()) return;   // only show indicator on today
+  if (viewDate !== todayStr()) return;
 
   const blocksArea = document.getElementById("blocks-area");
   const nm = currentMin();
   if (nm < START || nm > END) return;
 
-  const y   = ((nm - START) / 30) * SLOT_H;
   const ind = document.createElement("div");
   ind.id        = "time-ind";
-  ind.style.top = y + "px";
+  ind.style.top = ((nm - START) / 30) * SLOT_H + "px";
   blocksArea.appendChild(ind);
 
   if (!hasAutoScrolled) {
     hasAutoScrolled = true;
     requestAnimationFrame(() => {
-      const wrap     = document.getElementById("timeline-wrap");
-      const scrollTo = Math.max(0, y - wrap.clientHeight * 0.35);
-      wrap.scrollTop = scrollTo;
+      const wrap = document.getElementById("timeline-wrap");
+      wrap.scrollTop = Math.max(0, ind.offsetTop - wrap.clientHeight * 0.35);
     });
   }
 }
 
-// Refresh time indicator every minute
 setInterval(() => {
   const old = document.getElementById("time-ind");
   if (old) old.remove();
@@ -273,12 +256,13 @@ setInterval(() => {
 }, 60_000);
 
 // ─────────────────────────────────────────────────────
-//  Day navigation
+//  Day navigation — pure local-date arithmetic, no UTC
 // ─────────────────────────────────────────────────────
 function navigate(delta) {
-  const d = new Date(viewDate + "T00:00:00");
+  const parts = viewDate.split("-").map(Number);
+  const d     = new Date(parts[0], parts[1] - 1, parts[2]);  // local
   d.setDate(d.getDate() + delta);
-  viewDate        = d.toISOString().slice(0, 10);
+  viewDate        = localDateStr(d);   // stay local
   schedule        = loadSchedule();
   hasAutoScrolled = false;
   render();
@@ -303,10 +287,8 @@ function openSheet(slots, isAssigned) {
   document.getElementById("sheet-title").textContent =
     act ? `${act}  ·  ${fmtMin(sm)} – ${fmtMin(em)}` : `${fmtMin(sm)} – ${fmtMin(em)}`;
 
-  // Pre-fill detail input with existing note
   document.getElementById("sheet-detail").value = existDetail;
 
-  // ── Build options ──
   const opts = document.getElementById("sheet-options");
   opts.innerHTML = "";
 
@@ -323,14 +305,12 @@ function openSheet(slots, isAssigned) {
     opts.appendChild(clearBtn);
   }
 
-  // 3-column grid of templates
   const grid = document.createElement("div");
   grid.className = "sheet-grid";
 
   allTemplates().forEach(tmpl => {
     const btn = document.createElement("button");
     btn.className = "sheet-opt template" + (act === tmpl.name ? " active" : "");
-    btn.style.setProperty("--tmpl-color", tmpl.color);
     btn.style.borderLeftColor = tmpl.color;
     btn.style.color           = tmpl.color;
     btn.textContent           = tmpl.name;
@@ -346,8 +326,6 @@ function openSheet(slots, isAssigned) {
   });
 
   opts.appendChild(grid);
-
-  // Reset new-activity fields
   document.getElementById("new-name").value = "";
   renderColorSwatches();
 
@@ -366,23 +344,18 @@ function renderColorSwatches() {
   row.innerHTML = "";
   PALETTE_NAMED.forEach(({ name, color }) => {
     const sw = document.createElement("div");
-    sw.className = "color-swatch" + (color === selectedColor ? " selected" : "");
+    sw.className    = "color-swatch" + (color === selectedColor ? " selected" : "");
     sw.style.background = color;
-    sw.title            = name;
-    sw.addEventListener("click", () => {
-      selectedColor = color;
-      renderColorSwatches();
-    });
+    sw.title        = name;
+    sw.addEventListener("click", () => { selectedColor = color; renderColorSwatches(); });
     row.appendChild(sw);
   });
 }
 
-// ── Add custom activity ──
 document.getElementById("add-custom-btn").addEventListener("click", () => {
   const name = document.getElementById("new-name").value.trim();
   if (!name || !sheetTarget) return;
   const detail = document.getElementById("sheet-detail").value.trim();
-
   saveCustomTemplate(name, selectedColor);
   sheetTarget.slots.forEach(s => { schedule[s] = { activity: name, detail }; });
   saveSchedule(schedule);
@@ -394,7 +367,6 @@ document.getElementById("new-name").addEventListener("keydown", e => {
   if (e.key === "Enter") document.getElementById("add-custom-btn").click();
 });
 
-// Close on backdrop tap
 document.getElementById("backdrop").addEventListener("click", closeSheet);
 
 // ─────────────────────────────────────────────────────
@@ -402,11 +374,10 @@ document.getElementById("backdrop").addEventListener("click", closeSheet);
 // ─────────────────────────────────────────────────────
 document.getElementById("btn-push").addEventListener("click", () => {
   const nm = currentMin();
-
   let currentIdx = -1;
   for (let i = 0; i < SLOTS.length; i++) {
-    const slotStart = START + i * 30;
-    if (nm >= slotStart && nm < slotStart + 30) { currentIdx = i; break; }
+    const ss = START + i * 30;
+    if (nm >= ss && nm < ss + 30) { currentIdx = i; break; }
   }
   if (currentIdx < 0 && nm < START) currentIdx = 0;
   if (currentIdx < 0) return;
@@ -423,23 +394,13 @@ document.getElementById("btn-push").addEventListener("click", () => {
 });
 
 // ─────────────────────────────────────────────────────
-//  Export
+//  Export JSON
 // ─────────────────────────────────────────────────────
-function triggerDownload(filename, content, mimeType) {
-  const a    = document.createElement("a");
-  a.href     = URL.createObjectURL(new Blob([content], { type: mimeType }));
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(a.href);
-}
-
 document.getElementById("btn-json").addEventListener("click", () => {
   const data = {
     date:        viewDate,
     generatedAt: new Date().toISOString(),
-    slots: Object.fromEntries(SLOTS.map(s => [s, schedule[s]])),
+    slots:  Object.fromEntries(SLOTS.map(s => [s, schedule[s]])),
     blocks: groupSlots(schedule)
       .filter(g => g.activity)
       .map(g => ({
@@ -451,21 +412,14 @@ document.getElementById("btn-json").addEventListener("click", () => {
         color:    colorOf(g.activity),
       })),
   };
-  triggerDownload(`okapi-${viewDate}.json`, JSON.stringify(data, null, 2), "application/json");
-});
-
-document.getElementById("btn-csv").addEventListener("click", () => {
-  const rows = [
-    "time,end,activity,detail,duration_min",
-    ...SLOTS.map((s, i) => {
-      const sm  = START + i * 30;
-      const em  = sm + 30;
-      const act = slotActivity(schedule[s]) || "";
-      const det = slotDetail(schedule[s]);
-      return `${fmtMin(sm)},${fmtMin(em)},"${act}","${det}",${act ? 30 : ""}`;
-    }),
-  ];
-  triggerDownload(`okapi-${viewDate}.csv`, rows.join("\n"), "text/csv");
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a    = document.createElement("a");
+  a.href     = URL.createObjectURL(blob);
+  a.download = `okapi-${viewDate}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
 });
 
 // ─────────────────────────────────────────────────────
