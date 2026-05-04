@@ -226,6 +226,10 @@ function renderTimeline() {
   });
 
   renderTimeIndicator();
+
+  // Weather overlays — no-op if okapi-weather.js not loaded or disabled
+  if (typeof renderSunsetLine    === "function") renderSunsetLine();
+  if (typeof renderWeatherStamps === "function") renderWeatherStamps();
 }
 
 function renderTimeIndicator() {
@@ -426,3 +430,8 @@ document.getElementById("btn-json").addEventListener("click", () => {
 //  Init
 // ─────────────────────────────────────────────────────
 render();
+
+// Weather loads async; re-render once data arrives so stamps appear
+if (typeof initWeather === "function") {
+  initWeather().then(() => render());
+}

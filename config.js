@@ -10,6 +10,23 @@ const OKAPI_CONFIG = {
   dayEnd:   "22:00",   // last slot ends here (32 × 30 min)
 
 
+  // ── Weather ───────────────────────────────────────────
+  weather: {
+    enabled:          true,
+
+    // Open-Meteo location (Budapest)
+    latitude:         47.4979,
+    longitude:        19.0402,
+    timezone:         "Europe/Budapest",
+
+    // Wind gust above this value shows km/h indicator on stamp
+    windThresholdKmh: 40,
+
+    // Opened in new tab when any weather stamp is clicked
+    radarUrl: "https://www.met.hu/idojaras/aktualis_idojaras/radar/index.php",
+  },
+
+
   // ── Colour palette ────────────────────────────────────
   // Used by custom activity creator and color swatches.
   // Add, remove, or rename entries freely.
