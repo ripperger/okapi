@@ -533,7 +533,7 @@ html, body {
   gap: 1px;
   cursor: pointer;
   z-index: 3;
-  opacity: 0.55;
+  opacity: 0.90;
   transition: opacity 0.15s;
   /* keep stamps from triggering slot clicks */
   pointer-events: auto;
