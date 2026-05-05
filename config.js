@@ -7,7 +7,7 @@ const OKAPI_CONFIG = {
 
   // ── Day bounds ────────────────────────────────────────
   dayStart: "07:00",   // first slot
-  dayEnd:   "22:00",   // last slot ends here (32 × 30 min)
+  dayEnd:   "23:00",   // last slot ends here (32 × 30 min)
 
 
   // ── Weather ───────────────────────────────────────────
