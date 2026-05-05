@@ -36,7 +36,7 @@ async function _loadSunset() {
     const data = await resp.json();
     if (!data[key]) return;
 
-    const [h, m]  = data[key]["sunset"].split(":").map(Number);
+    const [h, m]  = data[key].sunset.split(":").map(Number);
     _sunsetMin    = h * 60 + m;
   } catch (_) {}
 }
