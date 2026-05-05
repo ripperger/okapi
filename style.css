@@ -503,19 +503,20 @@ html, body {
 .sunset-line {
   position: absolute;
   left: 0; right: 0;
-  height: 1px;
-  /* Fades right to blend into blocks rather than hard-stop */
-  background: linear-gradient(to right, #d4682a 0%, #d4682a 30%, transparent 100%);
+  height: 2px;
+  background: #c8541a;
+  box-shadow: 0 0 6px rgba(200, 84, 26, 0.55);
   pointer-events: none;
   z-index: 2;
 }
-/* Small nub on the left edge to anchor the line visually */
+/* Diamond marker on the left edge */
 .sunset-line::before {
   content: "";
   position: absolute;
-  left: 0; top: -2px;
-  width: 3px; height: 5px;
-  background: #d4682a;
+  left: -1px; top: -3px;
+  width: 8px; height: 8px;
+  background: #c8541a;
+  transform: rotate(45deg);
   border-radius: 1px;
 }
 
