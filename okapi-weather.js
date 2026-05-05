@@ -122,7 +122,7 @@ function renderWeatherStamps() {
 
   const container = document.getElementById("time-labels");
 
-  for (let m = START; m < END; m += 60) {
+  for (let m = START; m <= END; m += 60) {
     // Only stamp every 3rd hour measured from dayStart
     const offsetHours = (m - START) / 60;
     if (offsetHours % 3 !== 0) continue;
