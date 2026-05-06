@@ -3,13 +3,35 @@
 //  Sunset line + every-3rd-hour weather stamps.
 //  Requires config.js + app.js constants (START, END, SLOT_H,
 //  todayStr, viewDate) to be available at call time.
+//  Supports today AND tomorrow views.
 // ═══════════════════════════════════════════════════════
 
 const LS_WEATHER = "okapi_weather_cache";
 
 // ── Module state ─────────────────────────────────────
-let _weatherByHour = null;   // { 0..23 → { temp, code, gust, isDay } }
-let _sunsetMin     = null;   // minutes from midnight
+// Keyed by "today" | "tomorrow"
+let _weatherData = { today: null, tomorrow: null };  // { hour → { temp, code, gust, isDay } }
+let _sunset      = { today: null, tomorrow: null };  // minutes from midnight
+
+// ─────────────────────────────────────────────────────
+//  Date helpers (local — never toISOString)
+// ─────────────────────────────────────────────────────
+function _tomorrowStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+// Returns "today" | "tomorrow" | null for a given YYYY-MM-DD viewDate
+function _dayKey() {
+  if (viewDate === todayStr())    return "today";
+  if (viewDate === _tomorrowStr()) return "tomorrow";
+  return null;
+}
 
 // ─────────────────────────────────────────────────────
 //  Public init — called by app.js after first render
@@ -22,27 +44,42 @@ async function initWeather() {
 }
 
 // ─────────────────────────────────────────────────────
-//  Sunset — static JSON lookup
+//  Sunset — static JSON lookup for today + tomorrow
 // ─────────────────────────────────────────────────────
 async function _loadSunset() {
   try {
-    const today = new Date();
-    const mm    = String(today.getMonth() + 1).padStart(2, "0");
-    const dd    = String(today.getDate()).padStart(2, "0");
-    const key   = `${mm}-${dd}`;
-
     const resp = await fetch("okapi-sunset.json");
     if (!resp.ok) return;
     const data = await resp.json();
-    if (!data[key]) return;
 
-    const [h, m]  = data[key].sunset.split(":").map(Number);
-    _sunsetMin    = h * 60 + m;
+    // Today
+    const td   = new Date();
+    const todayKey = _mmdd(td);
+    if (data[todayKey]) {
+      const [h, m] = data[todayKey].sunset.split(":").map(Number);
+      _sunset.today = h * 60 + m;
+    }
+
+    // Tomorrow
+    const tm       = new Date();
+    tm.setDate(tm.getDate() + 1);
+    const tomKey   = _mmdd(tm);
+    if (data[tomKey]) {
+      const [h, m] = data[tomKey].sunset.split(":").map(Number);
+      _sunset.tomorrow = h * 60 + m;
+    }
   } catch (_) {}
 }
 
+function _mmdd(dateObj) {
+  return (
+    String(dateObj.getMonth() + 1).padStart(2, "0") + "-" +
+    String(dateObj.getDate()).padStart(2, "0")
+  );
+}
+
 // ─────────────────────────────────────────────────────
-//  Weather — Open-Meteo fetch with stale-cache fallback
+//  Weather — Open-Meteo fetch (2 days) with stale-cache fallback
 // ─────────────────────────────────────────────────────
 async function _fetchWeather() {
   const cfg = OKAPI_CONFIG.weather;
@@ -54,14 +91,14 @@ async function _fetchWeather() {
       `?latitude=${cfg.latitude}&longitude=${cfg.longitude}` +
       `&hourly=temperature_2m,weather_code,wind_gusts_10m,is_day` +
       `&timezone=${encodeURIComponent(cfg.timezone)}` +
-      `&forecast_days=1`;
+      `&forecast_days=2`;
 
     const resp = await fetch(url);
     if (resp.ok) {
       const raw    = await resp.json();
       const parsed = _parseHourly(raw);
       localStorage.setItem(LS_WEATHER, JSON.stringify({ ts: Date.now(), data: parsed }));
-      _weatherByHour = parsed;
+      _weatherData = parsed;
       return;
     }
   } catch (_) {}
@@ -69,26 +106,36 @@ async function _fetchWeather() {
   // Fetch failed → use whatever is cached (any age is better than nothing)
   try {
     const cached = JSON.parse(localStorage.getItem(LS_WEATHER) || "null");
-    if (cached?.data) _weatherByHour = cached.data;
+    if (cached?.data) _weatherData = cached.data;
   } catch (_) {}
 }
 
-// Open-Meteo hourly array → { hour: { temp, code, gust, isDay } }
+// Open-Meteo hourly array → { today: { hour → {...} }, tomorrow: { hour → {...} } }
+// Timestamps look like "2026-05-04T07:00" — date prefix tells us which day.
 function _parseHourly(raw) {
-  const result = {};
+  const result = { today: {}, tomorrow: {} };
   const h = raw.hourly;
   if (!h?.time) return result;
 
+  const todayDate = todayStr();      // "YYYY-MM-DD"
+  const tomDate   = _tomorrowStr();  // "YYYY-MM-DD"
+
   h.time.forEach((t, i) => {
-    // Parse hour from "2026-05-04T07:00" — substring avoids any Date/UTC ambiguity
+    // "2026-05-04T07:00" → date = "2026-05-04", hour = 7
+    const date = t.substring(0, 10);
     const hour = parseInt(t.substring(11, 13), 10);
-    result[hour] = {
+
+    const entry = {
       temp:  Math.round(h.temperature_2m[i]),
       code:  h.weather_code[i],
       gust:  Math.round(h.wind_gusts_10m[i]),
       isDay: h.is_day[i] === 1,
     };
+
+    if (date === todayDate) result.today[hour]    = entry;
+    if (date === tomDate)   result.tomorrow[hour] = entry;
   });
+
   return result;
 }
 
@@ -97,14 +144,18 @@ function _parseHourly(raw) {
 // ─────────────────────────────────────────────────────
 function renderSunsetLine() {
   const cfg = OKAPI_CONFIG.weather;
-  if (!cfg?.enabled)       return;
-  if (_sunsetMin === null)  return;
-  if (viewDate !== todayStr()) return;   // only today
+  if (!cfg?.enabled) return;
+
+  const key = _dayKey();
+  if (!key) return;
+
+  const sunsetMin = _sunset[key];
+  if (sunsetMin === null) return;
 
   // Only draw if sunset falls inside the visible day range
-  if (_sunsetMin <= START || _sunsetMin >= END) return;
+  if (sunsetMin <= START || sunsetMin >= END) return;
 
-  const y    = ((_sunsetMin - START) / 30) * SLOT_H;
+  const y    = ((sunsetMin - START) / 30) * SLOT_H;
   const line = document.createElement("div");
   line.className   = "sunset-line";
   line.style.top   = y + "px";
@@ -116,9 +167,13 @@ function renderSunsetLine() {
 // ─────────────────────────────────────────────────────
 function renderWeatherStamps() {
   const cfg = OKAPI_CONFIG.weather;
-  if (!cfg?.enabled)        return;
-  if (!_weatherByHour)      return;
-  if (viewDate !== todayStr()) return;   // only today
+  if (!cfg?.enabled) return;
+
+  const key = _dayKey();
+  if (!key) return;
+
+  const hourlyData = _weatherData[key];
+  if (!hourlyData) return;
 
   const container = document.getElementById("time-labels");
 
@@ -128,7 +183,7 @@ function renderWeatherStamps() {
     if (offsetHours % 3 !== 0) continue;
 
     const hour = Math.floor(m / 60);
-    const w    = _weatherByHour[hour];
+    const w    = hourlyData[hour];
     if (!w) continue;
 
     const y = ((m - START) / 30) * SLOT_H;
@@ -144,8 +199,8 @@ function renderWeatherStamps() {
 
     // SVG icon
     const icon = document.createElement("div");
-    icon.className   = "weather-icon";
-    icon.innerHTML   = _getWeatherSVG(w.code, w.isDay);
+    icon.className = "weather-icon";
+    icon.innerHTML = _getWeatherSVG(w.code, w.isDay);
     stamp.appendChild(icon);
 
     // Temperature
@@ -170,20 +225,20 @@ function renderWeatherStamps() {
 //  WMO code → category
 // ─────────────────────────────────────────────────────
 function _wmoCategory(code) {
-  if (code === 0)                                            return "clear";
-  if (code <= 2)                                             return "partlyCloudy";
-  if (code === 3)                                            return "overcast";
-  if (code === 45 || code === 48)                            return "fog";
-  if (code >= 51 && code <= 57)                              return "drizzle";
+  if (code === 0)                                                return "clear";
+  if (code <= 2)                                                 return "partlyCloudy";
+  if (code === 3)                                                return "overcast";
+  if (code === 45 || code === 48)                                return "fog";
+  if (code >= 51 && code <= 57)                                  return "drizzle";
   if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return "rain";
   if ((code >= 71 && code <= 77) || code === 85 || code === 86) return "snow";
-  if (code >= 95)                                            return "thunder";
+  if (code >= 95)                                                return "thunder";
   return "overcast";
 }
 
 function _getWeatherSVG(code, isDay) {
-  const cat    = _wmoCategory(code);
-  const icons  = _SVG_ICONS[cat] ?? _SVG_ICONS.overcast;
+  const cat   = _wmoCategory(code);
+  const icons = _SVG_ICONS[cat] ?? _SVG_ICONS.overcast;
   return icons[isDay ? "day" : "night"] ?? icons.day;
 }
 
@@ -243,16 +298,16 @@ const _SVG_ICONS = {
   fog: {
     day: `<svg viewBox="0 0 20 20" fill="none">
       <g stroke="#8aaccc" stroke-width="1.5" stroke-linecap="round">
-        <line x1="3"  y1="7"  x2="17" y2="7"/>
+        <line x1="3"  y1="7"    x2="17" y2="7"/>
         <line x1="5"  y1="10.5" x2="15" y2="10.5"/>
-        <line x1="7"  y1="14" x2="13" y2="14"/>
+        <line x1="7"  y1="14"   x2="13" y2="14"/>
       </g>
     </svg>`,
     night: `<svg viewBox="0 0 20 20" fill="none">
       <g stroke="#4a6a8a" stroke-width="1.5" stroke-linecap="round">
-        <line x1="3"  y1="7"  x2="17" y2="7"/>
+        <line x1="3"  y1="7"    x2="17" y2="7"/>
         <line x1="5"  y1="10.5" x2="15" y2="10.5"/>
-        <line x1="7"  y1="14" x2="13" y2="14"/>
+        <line x1="7"  y1="14"   x2="13" y2="14"/>
       </g>
     </svg>`
   },
