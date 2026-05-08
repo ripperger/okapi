@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════
 //  OKAPI — WEATHER
 //  Sunset line + every-3rd-hour weather stamps.
+//  Data source: OpenWeatherMap (current + 5-day/3h forecast).
 //  Requires config.js + app.js constants (START, END, SLOT_H,
 //  todayStr, viewDate) to be available at call time.
 //  Supports today AND tomorrow views.
@@ -10,7 +11,8 @@ const LS_WEATHER = "okapi_weather_cache";
 
 // ── Module state ─────────────────────────────────────
 // Keyed by "today" | "tomorrow"
-let _weatherData = { today: null, tomorrow: null };  // { hour → { temp, code, gust, isDay } }
+// Each value: { hour → { temp, code, gust, isDay } }
+let _weatherData = { today: null, tomorrow: null };
 let _sunset      = { today: null, tomorrow: null };  // minutes from midnight
 
 // ─────────────────────────────────────────────────────
@@ -26,11 +28,18 @@ function _tomorrowStr() {
   ].join("-");
 }
 
-// Returns "today" | "tomorrow" | null for a given YYYY-MM-DD viewDate
+// Returns "today" | "tomorrow" | null for the current viewDate
 function _dayKey() {
-  if (viewDate === todayStr())    return "today";
+  if (viewDate === todayStr())     return "today";
   if (viewDate === _tomorrowStr()) return "tomorrow";
   return null;
+}
+
+function _mmdd(dateObj) {
+  return (
+    String(dateObj.getMonth() + 1).padStart(2, "0") + "-" +
+    String(dateObj.getDate()).padStart(2, "0")
+  );
 }
 
 // ─────────────────────────────────────────────────────
@@ -52,51 +61,43 @@ async function _loadSunset() {
     if (!resp.ok) return;
     const data = await resp.json();
 
-    // Today
-    const td   = new Date();
-    const todayKey = _mmdd(td);
-    if (data[todayKey]) {
-      const [h, m] = data[todayKey].sunset.split(":").map(Number);
+    const td = new Date();
+    if (data[_mmdd(td)]) {
+      const [h, m] = data[_mmdd(td)].sunset.split(":").map(Number);
       _sunset.today = h * 60 + m;
     }
 
-    // Tomorrow
-    const tm       = new Date();
+    const tm = new Date();
     tm.setDate(tm.getDate() + 1);
-    const tomKey   = _mmdd(tm);
-    if (data[tomKey]) {
-      const [h, m] = data[tomKey].sunset.split(":").map(Number);
+    if (data[_mmdd(tm)]) {
+      const [h, m] = data[_mmdd(tm)].sunset.split(":").map(Number);
       _sunset.tomorrow = h * 60 + m;
     }
   } catch (_) {}
 }
 
-function _mmdd(dateObj) {
-  return (
-    String(dateObj.getMonth() + 1).padStart(2, "0") + "-" +
-    String(dateObj.getDate()).padStart(2, "0")
-  );
-}
-
 // ─────────────────────────────────────────────────────
-//  Weather — Open-Meteo fetch (2 days) with stale-cache fallback
+//  Weather — OWM fetch with stale-cache fallback
+//  Two calls in parallel:
+//    /weather  → current conditions (observation-based)
+//    /forecast → 3-hour slots for next 5 days
 // ─────────────────────────────────────────────────────
 async function _fetchWeather() {
-  const cfg = OKAPI_CONFIG.weather;
+  const cfg  = OKAPI_CONFIG.weather;
+  const base = `https://api.openweathermap.org/data/2.5`;
+  const loc  = `lat=${cfg.latitude}&lon=${cfg.longitude}&appid=${cfg.apiKey}&units=metric`;
 
-  // Always try a fresh fetch first
   try {
-    const url =
-      `https://api.open-meteo.com/v1/forecast` +
-      `?latitude=${cfg.latitude}&longitude=${cfg.longitude}` +
-      `&hourly=temperature_2m,weather_code,wind_gusts_10m,is_day` +
-      `&timezone=${encodeURIComponent(cfg.timezone)}` +
-      `&forecast_days=2`;
+    const [curResp, fcResp] = await Promise.all([
+      fetch(`${base}/weather?${loc}`),
+      fetch(`${base}/forecast?${loc}`),
+    ]);
 
-    const resp = await fetch(url);
-    if (resp.ok) {
-      const raw    = await resp.json();
-      const parsed = _parseHourly(raw);
+    if (curResp.ok && fcResp.ok) {
+      const curRaw = await curResp.json();
+      const fcRaw  = await fcResp.json();
+
+      const parsed = _parseOwmData(curRaw, fcRaw);
       localStorage.setItem(LS_WEATHER, JSON.stringify({ ts: Date.now(), data: parsed }));
       _weatherData = parsed;
       return;
@@ -110,33 +111,61 @@ async function _fetchWeather() {
   } catch (_) {}
 }
 
-// Open-Meteo hourly array → { today: { hour → {...} }, tomorrow: { hour → {...} } }
-// Timestamps look like "2026-05-04T07:00" — date prefix tells us which day.
-function _parseHourly(raw) {
-  const result = { today: {}, tomorrow: {} };
-  const h = raw.hourly;
-  if (!h?.time) return result;
+// ─────────────────────────────────────────────────────
+//  Parse OWM responses
+// ─────────────────────────────────────────────────────
 
-  const todayDate = todayStr();      // "YYYY-MM-DD"
-  const tomDate   = _tomorrowStr();  // "YYYY-MM-DD"
+// Builds { today: { hour → entry }, tomorrow: { hour → entry } }
+// Forecast provides 3-hour slots; current overrides the current hour in today.
+function _parseOwmData(cur, fc) {
+  const result    = { today: {}, tomorrow: {} };
+  const todayDate = todayStr();
+  const tomDate   = _tomorrowStr();
 
-  h.time.forEach((t, i) => {
-    // "2026-05-04T07:00" → date = "2026-05-04", hour = 7
-    const date = t.substring(0, 10);
-    const hour = parseInt(t.substring(11, 13), 10);
+  // ── Forecast slots ───────────────────────────────
+  // dt_txt looks like "2026-05-07 16:00:00"
+  for (const slot of fc.list) {
+    const datePart = slot.dt_txt.substring(0, 10);
+    const hour     = parseInt(slot.dt_txt.substring(11, 13), 10);
 
     const entry = {
-      temp:  Math.round(h.temperature_2m[i]),
-      code:  h.weather_code[i],
-      gust:  Math.round(h.wind_gusts_10m[i]),
-      isDay: h.is_day[i] === 1,
+      temp:  Math.round(slot.main.temp),
+      code:  slot.weather[0].id,
+      gust:  Math.round(slot.wind.gust ?? slot.wind.speed),
+      isDay: slot.sys.pod === "d",
     };
 
-    if (date === todayDate) result.today[hour]    = entry;
-    if (date === tomDate)   result.tomorrow[hour] = entry;
-  });
+    if (datePart === todayDate) result.today[hour]    = entry;
+    if (datePart === tomDate)   result.tomorrow[hour] = entry;
+  }
+
+  // ── Current conditions override ──────────────────
+  // OWM /weather is observation-based — overrides the current hour in today.
+  const nowHour = new Date().getHours();
+  const isDay   = cur.dt >= cur.sys.sunrise && cur.dt < cur.sys.sunset;
+
+  result.today[nowHour] = {
+    temp:  Math.round(cur.main.temp),
+    code:  cur.weather[0].id,
+    gust:  Math.round(cur.wind.gust ?? cur.wind.speed),
+    isDay,
+  };
 
   return result;
+}
+
+// ─────────────────────────────────────────────────────
+//  Find closest available forecast entry for a stamp hour.
+//  OWM forecast uses 3-hour boundaries (0,3,6,9…) which
+//  don't align with stamps from dayStart (7,10,13…).
+// ─────────────────────────────────────────────────────
+function _nearestEntry(data, targetHour) {
+  const hours = Object.keys(data).map(Number);
+  if (!hours.length) return null;
+  const best = hours.reduce((a, b) =>
+    Math.abs(a - targetHour) <= Math.abs(b - targetHour) ? a : b
+  );
+  return data[best];
 }
 
 // ─────────────────────────────────────────────────────
@@ -152,13 +181,12 @@ function renderSunsetLine() {
   const sunsetMin = _sunset[key];
   if (sunsetMin === null) return;
 
-  // Only draw if sunset falls inside the visible day range
   if (sunsetMin <= START || sunsetMin >= END) return;
 
   const y    = ((sunsetMin - START) / 30) * SLOT_H;
   const line = document.createElement("div");
-  line.className   = "sunset-line";
-  line.style.top   = y + "px";
+  line.className = "sunset-line";
+  line.style.top = y + "px";
   document.getElementById("blocks-area").appendChild(line);
 }
 
@@ -176,40 +204,44 @@ function renderWeatherStamps() {
   if (!hourlyData) return;
 
   const container = document.getElementById("time-labels");
+  const nowHour   = new Date().getHours();
 
   for (let m = START; m <= END; m += 60) {
-    // Only stamp every 3rd hour measured from dayStart
     const offsetHours = (m - START) / 60;
     if (offsetHours % 3 !== 0) continue;
 
-    const hour = Math.floor(m / 60);
-    const w    = hourlyData[hour];
+    const stampHour = Math.floor(m / 60);
+
+    // For today's stamp that falls on the current hour: use live data.
+    // For all others: find nearest forecast slot.
+    const isCurrentStamp = key === "today" && stampHour === nowHour;
+    const w = isCurrentStamp
+      ? (hourlyData[nowHour] ?? _nearestEntry(hourlyData, stampHour))
+      : _nearestEntry(hourlyData, stampHour);
+
     if (!w) continue;
 
     const y = ((m - START) / 30) * SLOT_H;
 
     const stamp = document.createElement("div");
     stamp.className = "weather-stamp";
-    stamp.style.top = (y + 13) + "px";   // just below the time label text
+    stamp.style.top = (y + 13) + "px";
     stamp.title     = "Radar megnyitása";
     stamp.addEventListener("click", e => {
       e.stopPropagation();
       window.open(cfg.radarUrl, "_blank", "noopener");
     });
 
-    // SVG icon
     const icon = document.createElement("div");
     icon.className = "weather-icon";
     icon.innerHTML = _getWeatherSVG(w.code, w.isDay);
     stamp.appendChild(icon);
 
-    // Temperature
     const temp = document.createElement("div");
     temp.className   = "weather-temp";
     temp.textContent = `${w.temp}°`;
     stamp.appendChild(temp);
 
-    // Wind — only if above threshold
     if (w.gust >= cfg.windThresholdKmh) {
       const wind = document.createElement("div");
       wind.className   = "weather-wind";
@@ -222,22 +254,24 @@ function renderWeatherStamps() {
 }
 
 // ─────────────────────────────────────────────────────
-//  WMO code → category
+//  OWM code → icon category
+//  2xx thunder · 3xx drizzle · 5xx rain · 6xx snow
+//  7xx fog/mist · 800 clear · 801-802 partlyCloudy · 803+ overcast
 // ─────────────────────────────────────────────────────
-function _wmoCategory(code) {
-  if (code === 0)                                                return "clear";
-  if (code <= 2)                                                 return "partlyCloudy";
-  if (code === 3)                                                return "overcast";
-  if (code === 45 || code === 48)                                return "fog";
-  if (code >= 51 && code <= 57)                                  return "drizzle";
-  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return "rain";
-  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return "snow";
-  if (code >= 95)                                                return "thunder";
+function _owmCategory(code) {
+  if (code >= 200 && code < 300)    return "thunder";
+  if (code >= 300 && code < 400)    return "drizzle";
+  if (code >= 500 && code < 600)    return "rain";
+  if (code >= 600 && code < 700)    return "snow";
+  if (code >= 700 && code < 800)    return "fog";
+  if (code === 800)                 return "clear";
+  if (code === 801 || code === 802) return "partlyCloudy";
+  if (code >= 803)                  return "overcast";
   return "overcast";
 }
 
 function _getWeatherSVG(code, isDay) {
-  const cat   = _wmoCategory(code);
+  const cat   = _owmCategory(code);
   const icons = _SVG_ICONS[cat] ?? _SVG_ICONS.overcast;
   return icons[isDay ? "day" : "night"] ?? icons.day;
 }
