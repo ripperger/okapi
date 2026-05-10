@@ -15,7 +15,7 @@ const OKAPI_CONFIG = {
     enabled:          true,
 
     // OpenWeatherMap — free API key from openweathermap.org
-    apiKey:           "a99aa4b33b757c99deea998a43c4deb0 ",
+    apiKey:           "a99aa4b33b757c99deea998a43c4deb0",
 
     // Location (Budapest)
     latitude:         47.4979,
