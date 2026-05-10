@@ -18,8 +18,8 @@ const OKAPI_CONFIG = {
     apiKey:           "a99aa4b33b757c99deea998a43c4deb0",
 
     // Location (Budapest)
-    latitude:         47.4979,
-    longitude:        19.0402,
+    latitude:         47.535,
+    longitude:        19.077,
 
     // Wind gust above this value shows km/h indicator on stamp
     windThresholdKmh: 40,
