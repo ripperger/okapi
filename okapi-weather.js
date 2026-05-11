@@ -97,7 +97,21 @@ async function _fetchWeather() {
       const curRaw = await curResp.json();
       const fcRaw  = await fcResp.json();
 
-      const parsed = _parseOwmData(curRaw, fcRaw);
+      const parsed  = _parseOwmData(curRaw, fcRaw);
+      const nowHour = new Date().getHours();
+
+      // OWM's forecast only returns future slots, so past hours vanish on every
+      // fresh fetch. Carry them forward from whatever we had before (previous
+      // parse or stale cache) so past stamps can still render.
+      for (const dk of ["today", "tomorrow"]) {
+        if (!_weatherData[dk]) continue;
+        for (const [h, entry] of Object.entries(_weatherData[dk])) {
+          if (Number(h) < nowHour && !(h in parsed[dk])) {
+            parsed[dk][h] = entry;
+          }
+        }
+      }
+
       localStorage.setItem(LS_WEATHER, JSON.stringify({ ts: Date.now(), data: parsed }));
       _weatherData = parsed;
       return;
@@ -207,9 +221,8 @@ function renderWeatherStamps() {
   const nowHour   = new Date().getHours();
 
   // Find which stamp hour is closest to now (today only).
-  // That stamp receives the current observation; all earlier stamps are skipped.
-  // Forecast data with the observation hour stripped is used for all other stamps
-  // so the observation can't bleed into future lookups via _nearestEntry.
+  // That stamp receives the current observation; all others use forecast-only
+  // data so the observation can't bleed via _nearestEntry.
   let closestStampHour = null;
   if (key === "today") {
     for (let m = START; m <= END; m += 60) {
@@ -234,11 +247,10 @@ function renderWeatherStamps() {
 
     const stampHour = Math.floor(m / 60);
 
-    // Skip stamps before the closest-to-now stamp — OWM doesn't return past
-    // forecast slots, so there's no valid data to show for them.
-    if (key === "today" && stampHour < closestStampHour) continue;
-
-    // Closest stamp → current observation. All others → forecast only.
+    // Closest stamp → current observation. Past/future stamps → forecast only.
+    // Past slots are filled from the merged cache (see _fetchWeather); if there's
+    // nothing there for a given hour, _nearestEntry returns null and the stamp is
+    // silently skipped by the !w guard below.
     const isCurrentStamp = key === "today" && stampHour === closestStampHour;
     const w = isCurrentStamp
       ? (hourlyData[nowHour] ?? _nearestEntry(forecastOnly, stampHour))
