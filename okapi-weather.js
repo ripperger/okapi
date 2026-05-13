@@ -98,7 +98,7 @@ async function _fetchWeather() {
       const fcRaw  = await fcResp.json();
 
       const parsed = _parseOwmData(curRaw, fcRaw);
-      localStorage      localStorage.setItem(LS_WEATHER, JSON.stringify({ ts: Date.now(), data: parsed }));
+      localStorage.setItem(LS_WEATHER, JSON.stringify({ ts: Date.now(), data: parsed }));
       _weatherData = parsed;
       return;
     }
@@ -159,11 +159,6 @@ function _parseOwmData(cur, fc) {
   return result;
 }
 
-// ─────────────────────────────────────────────────────
-//  Find closest available forecast entry for a stamp hour.
-//  OWM forecast uses 3-hour boundaries (0,3,6,9…) which
-//  don't align with stamps from dayStart (7,10,13…).
-// ─────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────
 //  Render — sunset line
