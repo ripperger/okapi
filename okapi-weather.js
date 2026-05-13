@@ -97,22 +97,8 @@ async function _fetchWeather() {
       const curRaw = await curResp.json();
       const fcRaw  = await fcResp.json();
 
-      const parsed  = _parseOwmData(curRaw, fcRaw);
-      const nowHour = new Date().getHours();
-
-      // OWM's forecast only returns future slots, so past hours vanish on every
-      // fresh fetch. Carry them forward from whatever we had before (previous
-      // parse or stale cache) so past stamps can still render.
-      for (const dk of ["today", "tomorrow"]) {
-        if (!_weatherData[dk]) continue;
-        for (const [h, entry] of Object.entries(_weatherData[dk])) {
-          if (Number(h) < nowHour && !(h in parsed[dk])) {
-            parsed[dk][h] = entry;
-          }
-        }
-      }
-
-      localStorage.setItem(LS_WEATHER, JSON.stringify({ ts: Date.now(), data: parsed }));
+      const parsed = _parseOwmData(curRaw, fcRaw);
+      localStorage      localStorage.setItem(LS_WEATHER, JSON.stringify({ ts: Date.now(), data: parsed }));
       _weatherData = parsed;
       return;
     }
@@ -136,11 +122,15 @@ function _parseOwmData(cur, fc) {
   const todayDate = todayStr();
   const tomDate   = _tomorrowStr();
 
-  // ── Forecast slots ───────────────────────────────
-  // dt_txt looks like "2026-05-07 16:00:00"
+  // Forecast slots.
+  // dt_txt is UTC ("2026-05-07 16:00:00"). Parse as UTC and convert to local
+  // hour so each slot lands at the correct position on the local timeline.
+  // datePart stays in UTC — only mismatches at midnight boundaries, which fall
+  // outside dayStart/dayEnd anyway.
   for (const slot of fc.list) {
+    const localDt  = new Date(slot.dt_txt.replace(" ", "T") + "Z");
     const datePart = slot.dt_txt.substring(0, 10);
-    const hour     = parseInt(slot.dt_txt.substring(11, 13), 10);
+    const hour     = localDt.getHours();
 
     const entry = {
       temp:  Math.round(slot.main.temp),
@@ -153,8 +143,9 @@ function _parseOwmData(cur, fc) {
     if (datePart === tomDate)   result.tomorrow[hour] = entry;
   }
 
-  // ── Current conditions override ──────────────────
-  // OWM /weather is observation-based — overrides the current hour in today.
+  // Current conditions override.
+  // OWM /weather is observation-based. Overwrites the current local hour in
+  // today; if a forecast slot happens to land on the same hour it gets replaced.
   const nowHour = new Date().getHours();
   const isDay   = cur.dt >= cur.sys.sunrise && cur.dt < cur.sys.sunset;
 
@@ -173,14 +164,6 @@ function _parseOwmData(cur, fc) {
 //  OWM forecast uses 3-hour boundaries (0,3,6,9…) which
 //  don't align with stamps from dayStart (7,10,13…).
 // ─────────────────────────────────────────────────────
-function _nearestEntry(data, targetHour) {
-  const hours = Object.keys(data).map(Number);
-  if (!hours.length) return null;
-  const best = hours.reduce((a, b) =>
-    Math.abs(a - targetHour) <= Math.abs(b - targetHour) ? a : b
-  );
-  return data[best];
-}
 
 // ─────────────────────────────────────────────────────
 //  Render — sunset line
@@ -219,46 +202,19 @@ function renderWeatherStamps() {
 
   const container = document.getElementById("time-labels");
   const nowHour   = new Date().getHours();
+  const startHour = START / 60;
+  const endHour   = END   / 60;
 
-  // Find which stamp hour is closest to now (today only).
-  // That stamp receives the current observation; all others use forecast-only
-  // data so the observation can't bleed via _nearestEntry.
-  let closestStampHour = null;
-  if (key === "today") {
-    for (let m = START; m <= END; m += 60) {
-      if (((m - START) / 60) % 3 !== 0) continue;
-      const h = Math.floor(m / 60);
-      if (closestStampHour === null ||
-          Math.abs(h - nowHour) < Math.abs(closestStampHour - nowHour)) {
-        closestStampHour = h;
-      }
-    }
-  }
+  // hourlyData keys are local hours (set at parse time by _parseOwmData).
+  // Render a stamp for every entry that is within the visible day range and,
+  // on today's view, not already in the past.
+  for (const [hStr, w] of Object.entries(hourlyData)) {
+    const stampHour = Number(hStr);
 
-  // Forecast-only lookup: observation hour excluded so it can't win _nearestEntry
-  // for future stamp hours.
-  const forecastOnly = Object.fromEntries(
-    Object.entries(hourlyData).filter(([h]) => Number(h) !== nowHour)
-  );
+    if (key === "today" && stampHour < nowHour)       continue;
+    if (stampHour < startHour || stampHour > endHour) continue;
 
-  for (let m = START; m <= END; m += 60) {
-    const offsetHours = (m - START) / 60;
-    if (offsetHours % 3 !== 0) continue;
-
-    const stampHour = Math.floor(m / 60);
-
-    // Closest stamp → current observation. Past/future stamps → forecast only.
-    // Past slots are filled from the merged cache (see _fetchWeather); if there's
-    // nothing there for a given hour, _nearestEntry returns null and the stamp is
-    // silently skipped by the !w guard below.
-    const isCurrentStamp = key === "today" && stampHour === closestStampHour;
-    const w = isCurrentStamp
-      ? (hourlyData[nowHour] ?? _nearestEntry(forecastOnly, stampHour))
-      : _nearestEntry(forecastOnly, stampHour);
-
-    if (!w) continue;
-
-    const y = ((m - START) / 30) * SLOT_H;
+    const y = ((stampHour * 60 - START) / 30) * SLOT_H;
 
     const stamp = document.createElement("div");
     stamp.className = "weather-stamp";
